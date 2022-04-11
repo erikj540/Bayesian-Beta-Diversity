@@ -7,22 +7,29 @@ from scipy.stats import hypergeom
 from bro.utilityfunctions import uniform_distribution_pdf, normalize_pdf
 
 class DistributionComputations:
+    """Class that implements the pieces that are needed to compute the joint posterior distribution of s, Ra, and Rb given count data.
+    """
     def log_multinomial_coefficient(self, N, m):
         """
         Calculates logarithm of multinomial coefficient for N and m=(m1,...,mK), i.e.,
         log(N!/(m1! * m2! *** mK!))
 
-        Depens on: numpy, gammaln (from scipy.special)
+        :param int N: integer in numerator of multinomial coefficient
+        :param list(int) m: list of integers that should sum to N
+        :return float: log of multinomial coefficient
         """
         assert np.sum(m)==N, 'sum(m)={} needs to be N={}'.format(np.sum(m), N)
         return gammaln(N+1) - np.sum(gammaln(m+1))
 
-    def log_probability_of_count_data_given_repertoire_size(self, genesDrawn, R):
+    def log_probability_of_count_data_given_repertoire_size(self, count_data, R):
+        """Calculates logarithm of p(C|R) where C is count data and R is repertoire size.
+
+        :param list count_data: count data as list of sampled elements    
+        :param int R: repertoire size
+        :return float: logarithm of p(C|R)
         """
-        Calculates logarithm of p(C|R).
-        """
-        N = len(genesDrawn)
-        g, c = np.unique(genesDrawn,return_counts=True)
+        N = len(count_data)
+        g, c = np.unique(count_data, return_counts=True)
         observed_R = len(g)
         if R<observed_R:
             return np.log(0)
@@ -35,25 +42,13 @@ class DistributionComputations:
             y = self.log_multinomial_coefficient(N, c)
             z = N*np.log(R)
             return x+y-z
-    
-    def pdf_of_repertoire_size_without_count_data(self, n, m, R_prior):
-        """
-        When sampling is assumed to be uniform at random (for fixed m):
-        p(R|C) \propto p(R|n) = (R!/(R-n)!) * R^{-m} * p(R). 
-        """
-        pdf = []
-        for R, prob in R_prior:
-            tmp = np.log(factorial(R)) - np.log(factorial(R-n)) + m*np.log(1/R) + np.log(prob)
-            pdf.append([R, tmp])
-        pdf = np.array(pdf)
-        pdf[:,1] = np.exp(pdf[:,1])
-        assert pdf[:,1].sum()!=0, 'pdf sums to 0'
-        pdf = normalize_pdf(pdf)
-        return pdf
 
     def pdf_of_repertoire_size_given_count_data(self, count_data, R_prior):
-        """
-        Calculates p(R|C)
+        """Calculates p(R|C).
+
+        :param list count_data: list of sampled elements
+        :param np.array R_prior: 2xN prior on the repertoire size
+        :return np.array: 2xN posterior distribution p(R|C) with the same support as the prior.
         """
         pdf = []
         for R, prob in R_prior:
@@ -66,16 +61,15 @@ class DistributionComputations:
 
 
     def pdf_of_s_given_na_nb_nab_Ra_Rb(self, nab, na, nb, Ra, Rb):
-        """
-        Given data D=(nab,na,nb,Ra,Rb), calculates pdf of the overlap given the data p(s|D). 
+        """Given data D=(nab,na,nb,Ra,Rb), calculates pdf of the overlap given the data p(s|D). 
         For reference: hypergeom.pmf(special_drawn, total, special, draws, loc=0)
         
-        Relies on: numpy, uniform_distribution_pdf, hypergeom (from scipy.stats)
-        Parameters:
-            - nab (int) : empirical overlap
-            - na, nb, Ra, Rb (ints)
-        Returns: 
-            - pdf (np.array) : [[s,p(s|D)],...]
+        :param int nab: empirical overlap
+        :param int na: number of unique items sampled from set A
+        :param int nb: number of unique items sampled from set A
+        :param int Ra: size of set A
+        :param int Rb: size of set B
+        :return np.array: 2xN array representing p(s|D) in [[s,p(s|D)],...] form
         """
         # find smaller index
         R, n = [Ra, Rb], [na, nb]
@@ -108,8 +102,14 @@ class DistributionComputations:
         return s_given_na_nb_nab_Ra_Rb
 
     def calculate_joint_pdf_from_count_data(self, count_data, Ra_prior, Rb_prior):
-        """
+        """Compute the joint posterior distribution of (s, Ra, Rb) given count data and priors on the
+        repertoire sizes.
 
+        :param CountDataPair count_data: object that contains the count data from the two sets 
+        :param np.array Ra_prior: 2xN prior on the repertoire size Ra
+        :param np.array Rb_prior: 2xN prior on the repertoire size Rb
+        :return pd.DataFrame: dataframe representing the posterior distribution of (s, Ra, Rb) given
+            the count data
         """
         nab, na, nb = count_data.nab, count_data.na, count_data.nb
         Ra_dist = self.pdf_of_repertoire_size_given_count_data(count_data.count_dataA, Ra_prior)
@@ -133,14 +133,32 @@ class DistributionComputations:
             joint_pdf.extend([[int(s),Ra,Rb,prob] for s, prob in p_s[key]])
         joint_pdf = pd.DataFrame(joint_pdf, columns=['s','Ra','Rb','p(s,Ra,Rb)'])
 
-        # return joint_pdf.to_dict()
-        # return {'Ra_given_Ca_dist': Ra_dist, 'Rb_given_Cb_dist': Rb_dist,
-        #         'joint_pdf': joint_pdf}
         return joint_pdf
-        
 
+class CountDataPair:
+    """Helper class to collect count data for two repertoires."""
+    def __init__(self, count_dataA, count_dataB):
+        self.count_dataA = count_dataA
+        self.count_dataB = count_dataB
+
+        self.ma = len(self.count_dataA)
+        self.mb = len(self.count_dataB)
+        self.na = len(np.unique(self.count_dataA))
+        self.nb = len(np.unique(self.count_dataB))
+        self.nab = len(np.intersect1d(self.count_dataA, self.count_dataB))
+         
 class GenerateCountData:
+    """Class for generating synthetic count data.
+    """
     def __init__(self, s, Ra, Rb, ma, mb):
+        """Constructor
+
+        :param int s: repertoire overlap
+        :param int Ra: repertoire A size
+        :param int Rb: repertoire B size
+        :param int ma: number of items sampled from A
+        :param int mb: number of items sampled from B
+        """
         assert ((Ra-int(Ra)==0) and (Rb-int(Rb)==0) and (s-int(s)==0) and (ma-int(ma)==0) and (mb-int(mb)==0)), 'variables should be integers! Ra={},Rb={},s={},ma={},mb={}'.format(Ra,Rb,s,ma,mb)
         self.s = int(s)
         self.Ra = int(Ra)
@@ -155,12 +173,10 @@ class GenerateCountData:
 
         E.g., if Ra=5, Rb=6, s=3, then genesetA=[0,1,2,3,4] and genesetB=[0,1,2,5,6,7]
 
-        Parameters:
-            - s (int): repertoire overlap
-            - Ra (int): parasite A repertoire size
-            - Rb (int): parasite B repertoire size
-        Returns:
-            - (genesetA, genesetB): see description
+        :param int s: repertoire overlap
+        :param int Ra: parasite A repertoire size
+        :param int Rb: parasite B repertoire size
+        :return tuple: 2-tuple consisting of genesetA and genesetB (see docstring)
         """
         gene_pool_A = np.arange(0,self.Ra)
         gene_pool_B = np.array(list(range(0,self.s)) + list(range(self.Ra, self.Ra+(self.Rb-self.s))))
@@ -169,9 +185,7 @@ class GenerateCountData:
         return (gene_pool_A, gene_pool_B)
 
     def sample_from_gene_pool(self, m, gene_pool):
-        """
-        Draws samples with replacement for a gene pool. 
-        The gene pool is type returned by generate_genesets_given_s_and_R. 
+        """Draws samples with replacement for a gene pool. The gene pool is type returned by generate_genesets_given_s_and_R. 
         Returns the genes drawn.
         """
         count_data = np.random.choice(gene_pool, size=m, replace=True, p=np.repeat(1/len(gene_pool), len(gene_pool)))
@@ -179,29 +193,26 @@ class GenerateCountData:
         
 
     def generate_count_data(self):
-        """
-        Given a repertoire overlap, repertoire sizes, and number of samples per repertoire to draw. Returns the genes drawn from parasite A and genes drawn from parasite B
+        """Given a repertoire overlap, repertoire sizes, and number of samples per repertoire to draw. Returns
+        the genes drawn from parasite A and genes drawn from parasite B
         """
         gene_pool_A, gene_pool_B = self.generate_gene_pools()
-        self.count_dataA = self.sample_from_gene_pool(self.ma, gene_pool_A)
-        self.count_dataB = self.sample_from_gene_pool(self.mb, gene_pool_B)
-        
-        self.na = len(np.unique(self.count_dataA))
-        self.nb = len(np.unique(self.count_dataB))
-        self.nab = len(np.intersect1d(self.count_dataA, self.count_dataB))
+        count_dataA = self.sample_from_gene_pool(self.ma, gene_pool_A)
+        count_dataB = self.sample_from_gene_pool(self.mb, gene_pool_B)
+        self.count_data = CountDataPair(count_dataA, count_dataB)
 
 class ProcessJointPdfs:
+    """Utilities to process joint posterior distribution of (s, Ra, Rb) given count data.
+    """
     def compute_marginal_distribution(self, variable, joint_pdf):
-        """
-        Given p(s,Ra,Rb|Ca,Cb) computes p(var|Ca,Cb) by summing over other two
+        """Given p(s,Ra,Rb|Ca,Cb) computes p(var|Ca,Cb) by summing over other two
         variables. var \in {s,Ra,Rb}.
         """
         marginal = joint_pdf.groupby([variable], as_index=False)['p(s,Ra,Rb)'].sum()
         return marginal
 
     def confidence_interval_from_pdf_for_integer_valued_rv(self, pdf, prob=0.95):
-        """
-        Given the pdf for an integer valued random variable, compute X% confidence
+        """Given the pdf for an integer valued random variable, compute X% confidence
         interval. 
         """
         res = []
@@ -221,7 +232,6 @@ class ProcessJointPdfs:
     
     def compute_marginal_and_ci_from_joint_pdf(self, variable, joint_pdf, prob=0.95):
         """
-
         """
         results = {}
         # for var in ['s','Ra','Rb']:
@@ -233,8 +243,7 @@ class ProcessJointPdfs:
 
 
     def sorensen_dice_coefficients(self, joint_pdf, s, Ra, Rb, na, nb, nab):
-        """
-        Compute the true, empirical, and Bayesian Sorensen-Dice coefficients.
+        """Compute the true, empirical, and Bayesian Sorensen-Dice coefficients.
         true = 2*s/(Ra+Rb), empirical = 2*nab/(na+nb),
         Bayesian = \sum_{Ra,Rb,s} 2*s/(Ra+Rb) * p(s,Ra,Rb|Ca,Cb)
         """
@@ -248,23 +257,33 @@ class ProcessJointPdfs:
                 'bayesian_sd': bayesian_sorensen_dice}
 
 def generate_count_data_and_compute_joint_pdf(s, Ra, Rb, ma, mb, Ra_prior, Rb_prior):
+    """Helper function to generate synthetic count data and then compute the joint posterior 
+    distribution of (s, Ra, Rb) given the count data and repertoire priors.
+
+    :param int s: size of set overlap
+    :param int Ra: size of set A
+    :param int Rb: size of set B
+    :param int ma: number of items sampled from set A
+    :param int mb: number of items sampled from set A
+    :param np.array Ra_prior: 2xN prior on the repertoire size Ra
+    :param np.array Rb_prior: 2xN prior on the repertoire size Rb
+    :return dict: dictionary of count data and joint pdf
+    """
     print('Generating count data')
-    data = GenerateCountData(s,Ra,Rb,ma,mb)
+    data = GenerateCountData(s, Ra, Rb, ma, mb)
+    count_data = data.count_data
 
     print('Calculating joint pdf...')
     computation = DistributionComputations()
-    # results = computation.calculate_joint_pdf(data, R_prior, R_prior)
-    joint_pdf = computation.calculate_joint_pdf_from_count_data(data, Ra_prior, Rb_prior)
+    joint_pdf = computation.calculate_joint_pdf_from_count_data(count_data, Ra_prior, Rb_prior)
     print('Done calculating joint pdf...')
 
-    results = {'s': s, 'Ra': Ra, 'Rb': Rb,
-              'Ra_prior': Ra_prior, 'Rb_prior': Rb_prior,
-              'na': data.na, 'nb': data.nb, 'nab': data.nab, 
-              'Ca': data.count_dataA, 
-              'Cb': data.count_dataB,
-              'ma': ma,
-              'mb': mb,
-              'joint_pdf': joint_pdf}
+    results = {
+        # 's': s, 'Ra': Ra, 'Rb': Rb,
+        # 'Ra_prior': Ra_prior, 'Rb_prior': Rb_prior,
+        'count_data': count_data,
+        'joint_pdf': joint_pdf
+    }
 
     return results
     

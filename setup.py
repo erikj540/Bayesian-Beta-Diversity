@@ -2,6 +2,9 @@ import io
 from pkgutil import walk_packages
 from setuptools import setup
 
+with open("README.md", "r") as fh:
+    long_description = fh.read()
+
 
 def find_packages(path):
     # This method returns packages and subpackages as well.

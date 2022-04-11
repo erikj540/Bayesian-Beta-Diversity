@@ -2,7 +2,7 @@
 
 The code for our Bayesian repertoire overlap paper is available as a python package called `bro`. To install the `bro` package, the `pip` package manager needs to be installed. Once `pip` is installed, from the parent directory that contains this README (i.e., the `Bayesian-Beta-Diversity` directory), you can install the `bro` package via
 ```
-pip install -e bro/
+pip install -e ./
 ```
 
 To verify that the package installed, run `test.py` via
