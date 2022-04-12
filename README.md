@@ -32,3 +32,6 @@ To use `calculate_joint_pdf_from_count_data`, the assumption are
 
 # Example
 For a more detailed example that includes generating synthetic count data and computing marginal distributions and credible intervals from the joint PDF, check out the `example_notebook.ipynb` Jupyter notebook in this repo. 
+
+# Figures and data
+We have included the data used to make the figures in our paper in the `data` folder. The Jupyter notebook `paper_figures.ipynb` recreates the figures in our paper using the included data.
